@@ -171,8 +171,9 @@
                         else flexboxDelay(true);
                         break;
                     case 13: // enter
-                        if (getCurr()) selectCurr();
-                        else flexboxDelay(true);
+                        if (getCurr()) { 
+							selectCurr(); return false;
+						} else flexboxDelay(true);
                         break;
                     case 27: //	escape
                         hideResults();
@@ -204,8 +205,7 @@
         }
 
         function flexbox(p, arrowOrPagingClicked, prevQuery) {
-            if (arrowOrPagingClicked) prevQuery = '';
-            var q = prevQuery && prevQuery.length > 0 ? prevQuery : $.trim($input.val());
+            var q = arrowOrPagingClicked && typeof(prevQuery)!='undefined' && prevQuery!=null ? prevQuery : $.trim($input.val());
 
             if (q.length >= o.minChars || arrowOrPagingClicked) {
 				// If we are getting data from the server, set the height of the content box so it doesn't shrink when navigating between pages, due to the $content.html('') below...
@@ -498,8 +498,19 @@
 			
 			$hdn.val($input.val());
             if (parseInt(d[o.totalProperty]) === 0 && o.noResultsText && o.noResultsText.length > 0) {
-                $content.addClass(o.noResultsClass).html(o.noResultsText);
-                $ctr.show();
+				$content.addClass(o.noResultsClass);
+                if (o.addNewEntry && o.addNewEntry.onAdd) {
+					var $newEntryPH = $('<div/>').addClass("row").addClass(o.selectClass).addClass(o.addNewEntry.cssClass).attr('val',q);
+					$newEntryPH.html( o.addNewEntry.entryTextTemplate.replace(/[{][q][}]/g, q) );
+					$content.html('');
+					$content.append($newEntryPH);
+					$newEntryPH.click(function() {
+						selectCurr();
+					});
+				} else {
+					$content.html(o.noResultsText);
+				}
+				$ctr.show();
                 return;
             } else $content.removeClass(o.noResultsClass);
 
@@ -542,7 +553,10 @@
                     .addClass('row')
                     .html(result)
                     .appendTo($content);
-
+				if (o.showResultsWithTitle) {
+					$row.attr('title', data[o.displayValue]);
+				}
+				
                 if (exactMatch || (++itemCount == 1 && o.selectFirstMatch) || selectedMatch) {
                     $row.addClass(o.selectClass);
                 }
@@ -634,17 +648,27 @@
 
         function selectCurr() {
             $curr = getCurr();
-
-            if ($curr) {
-				$hdn.val($curr.attr('id'));
-                $input.val($curr.attr('val')).focus();
+			
+			var setCurrentValue = function(id,val) {
+				$hdn.val(id);
+                $input.val(val).focus();
                 hideResults();
-
 				$input.attr("hiddenValue",$hdn.val());
-
                 if (o.onSelect) {
                     o.onSelect.apply($input[0]);
-                }
+                }				
+			};
+			
+			if ($curr.hasClass(o.addNewEntry.cssClass) && o.addNewEntry.onAdd) {
+				if (o.addNewEntry.onAdd( $curr.attr('val'), function(id, text) {
+					setCurrentValue(id,text);
+				})) {
+					hideResults();
+				}
+			}
+			
+            if ($curr) {
+				setCurrentValue($curr.attr('id'),$curr.attr('val'));
             }
         }
 
@@ -827,7 +851,8 @@
         initialValue: '', // what should the value of the input field be when the form is loaded?
         watermark: '', // text that appears when flexbox is loaded, if no initialValue is specified.  style with css class '.ffb-input.watermark'
         width: 200, // total width of flexbox.  auto-adjusts based on showArrow value
-        resultsProperty: 'results', // json property in response that references array of results
+        showResultsWithTitle : false,
+		resultsProperty: 'results', // json property in response that references array of results
         totalProperty: 'total', // json property in response that references the total results (for paging)
         maxVisibleRows: 0, // default is 0, which means it is ignored.  use either this, or paging.pageSize
         paging: {
@@ -840,6 +865,11 @@
             summaryTemplate: 'Displaying {start}-{end} of {total} results' // can use {page} and {pages} as well
         },
 		onComposeParams:null,
+		addNewEntry : {
+			onAdd: false, //function to run for adding new entry; if not defined, adding new entries is disabled
+			cssClass : "addNewEntry",
+			entryTextTemplate : "Create \"{q}\"..."
+		}, 
 		abortIrrelevantRequest:false
     };
 
