@@ -10,41 +10,6 @@
 (function($) {
     $.flexbox = function(div, o) {
 
-        // TODO: in straight type-ahead mode (showResults: false), if noMatchingResults, dropdown appears after new match
-        // TODO: consider having options.mode (select, which replaces html select; combobox; suggest; others?)
-        // TODO: on resize (at least when wrapping within a table), the arrow is pushed down to the next line
-        // TODO: check for boundary/value problems (such as minChars of -1) and alert them
-        // TODO: add options for advanced paging template
-        // TODO: general cleanup and refactoring, commenting
-        // TODO: detailed Exception handling, logging
-        // TODO: FF2, up arrow from bottom has erratic scroll behavior (if multiple flexboxes on page)
-        // TODO: FF2 (and maybe IE7): if maxVisibleRows == number of returned rows, height is a bit off (maybe set to auto?)
-        // TODO: escape key only works from input box (this might be okay)
-        // TODO: make .getJSON parameters (object and callback function) configurable (e.g. when calling yahoo image search)
-        // TODO: escape key reverts to previous value (FF only?) (is this a good thing?)
-
-		// TEST: highlightMatches uses the case of whatever you typed in to replace the match string, which can look funny
-        // TEST: handle pageDown and pageUp keys when scrolling through results
-        // TEST: allow client-side paging (return all data initially, set paging:{pageSize:#}, and ensure maxCacheBytes is > 0)
-        // TEST: accept json object as first parameter to flexbox instead of page source, and have it work like a combobox
-        // TEST: implement no results template
-        // TEST: implement noResultsText and class
-        // TEST: watermark color should be configurable (and so should default input color)
-        // TEST: exception handling and alerts for common mistakes
-        // TEST: first example should use defaults ONLY
-        // TEST: add property initialValue, so you can set it when the flexbox loads
-        // TEST: handle hidden input value for form submissions
-        // TEST: how can we allow programmatically setting the field value (and therefore hidden value).  add jquery function?
-        // TEST: use pageSize parameter as threshold to switch from no paging to paging based on results
-        // TEST: if you type in an input value that matches the html, it might display html code (try typing "class" in the input box)
-        // TEST: don't require all paging subprops (let default override)
-        // TEST: when tabbing from one ffb to another, the previous ffb results flash...
-        // TEST: IE7: when two non-paging ffbs right after each other, with only a clear-both div between them, the bottom ffb jumps down when selecting a value, then jumps back up on mouseover
-        // TEST: FF2, make sure we scroll to top before showing results (maxVisibleRows only)
-        // TEST: if maxVisibleRows is hiding the value the user types in to the input, scroll to that value (is this even possible?)
-        // TEST: make sure caching supports multiple ffbs uniquely
-        // TEST: when entering a number in the paging input box, the results are displayed twice
-
         var timeout = false, 	// hold timeout ID for suggestion results to appear
         cache = [], 		    // simple array with cacheData key values, MRU is the first element
         cacheData = [],         // associative array holding actual cached data
@@ -53,21 +18,24 @@
         scrolling = false,
         pageSize = o.paging && o.paging.pageSize ? o.paging.pageSize : 0,
 		retrievingRemoteData = false,
+		retrievingRemoteDataRequest = null,
+		retrievingRemoteDataTimestamp = null,
         $div = $(div).css('position', 'relative').css('z-index', 0);
 
         // The hiddenField MUST be appended to the div before the input, or IE7 does not shift the dropdown below the input field (it overlaps)
-        var $hdn = $('<input type="hidden"/>')
-            .attr('id', $div.attr('id') + '_hidden')
-            .attr('name', $div.attr('id'))
-            .val(o.initialValue)
-            .appendTo($div);
-        var $input = $('<input/>')
-            .attr('id', $div.attr('id') + '_input')
-            .attr('autocomplete', 'off')
-            .addClass(o.inputClass)
-            .css('width', o.width + 'px')
-            .appendTo($div)
-            .click(function(e) {
+        var $hdn = $('<input type="hidden"/>');
+        $hdn.attr('id', $div.attr('id') + '_hidden');
+        $hdn.attr('name', $div.attr('id'));
+        $hdn.val(o.initialValue);
+        $hdn.appendTo($div);
+			
+        var $input = $('<input/>');
+		$input.attr('id', $div.attr('id') + '_input');
+        $input.attr('autocomplete', 'off');
+        $input.addClass(o.inputClass);
+        $input.css('width', o.width + 'px');
+        $input.appendTo($div)
+        $input.click(function(e) {
                 if (o.watermark !== '' && this.value === o.watermark)
                     this.value = '';
                 else
@@ -141,17 +109,17 @@
             top += inputPad;
         }
 		
-        var $ctr = $('<div></div>')
-            .attr('id', $div.attr('id') + '_ctr')
-            .css('width', inputWidth + arrowWidth)
-            .css('top', top)
-            .css('left', 0)
-            .addClass(o.containerClass)
-            .appendTo($div)
-			.mousedown(function(e) {
+        var $ctr = $('<div></div>');
+        $ctr.attr('id', $div.attr('id') + '_ctr');
+        $ctr.css('width', inputWidth + arrowWidth);
+        $ctr.css('top', top);
+        $ctr.css('left', 0);
+        $ctr.addClass(o.containerClass);
+        $ctr.appendTo($div);
+		$ctr.mousedown(function(e) {
 				$input.data('active', true);
-			})
-            .hide();
+			});
+		$ctr.hide();
 
         var $content = $('<div></div>')
             .addClass(o.contentClass)
@@ -253,8 +221,15 @@
                 }
                 else {
                     var params = { q: q, p: p, s: pageSize, contentType: 'application/json; charset=utf-8' };
+					if (o.onComposeParams) params = $.extend( params, o.onComposeParams(params) );
+					
+					var requestTimestamp = new Date();
                     var callback = function(data, overrideQuery) {
-                        if (overrideQuery === true) q = overrideQuery; // must compare to boolean because by default, the string value "success" is passed when the jQuery $.getJSON method's callback is called
+                        retrievingRemoteDataRequest = null;
+						if (retrievingRemoteDataTimestamp!=null && requestTimestamp<retrievingRemoteDataTimestamp)
+							return;
+						
+						if (overrideQuery === true) q = overrideQuery; // must compare to boolean because by default, the string value "success" is passed when the jQuery $.getJSON method's callback is called
                         var totalResults = parseInt(data[o.totalProperty]);
 
                         // Handle client-side paging, if any paging configuration options were specified
@@ -286,9 +261,21 @@
 						else callback(o.source);
 					}
 					else {
+						if (retrievingRemoteData && retrievingRemoteDataRequest!=null) {
+							if (o.abortIrrelevantRequest) {
+								var req = retrievingRemoteDataRequest;
+								retrievingRemoteDataRequest = null;
+								req.abort();
+							}
+						}
+						
 						retrievingRemoteData = true;
-						if (o.method.toUpperCase() == 'POST') $.post(o.source, params, callback, 'json');
-						else $.getJSON(o.source, params, callback);
+						retrievingRemoteDataTimestamp = requestTimestamp;
+						if (o.method.toUpperCase() == 'POST') {
+							retrievingRemoteDataRequest = $.post(o.source, params, callback, 'json');
+						} else {
+							retrievingRemoteDataRequest = $.getJSON(o.source, params, callback);
+						}
 					}
                 }
             } else
@@ -653,6 +640,8 @@
                 $input.val($curr.attr('val')).focus();
                 hideResults();
 
+				$input.attr("hiddenValue",$hdn.val());
+
                 if (o.onSelect) {
                     o.onSelect.apply($input[0]);
                 }
@@ -848,7 +837,9 @@
             showSummary: true, // whether to show 'displaying 1-10 of 200 results' text
             summaryClass: 'summary', // class for 'displaying 1-10 of 200 results', prefix with containerClass
             summaryTemplate: 'Displaying {start}-{end} of {total} results' // can use {page} and {pages} as well
-        }
+        },
+		onComposeParams:null,
+		abortIrrelevantRequest:false
     };
 
     $.fn.setValue = function(val) {
